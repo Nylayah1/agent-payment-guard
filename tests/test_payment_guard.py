@@ -1,6 +1,7 @@
 import base64
 import threading
 import unittest
+from unittest.mock import patch
 from decimal import Decimal
 from Payment_guard import Policy, ReplayStore, authorize, sign_approval
 
@@ -11,6 +12,9 @@ PAYEE = "acct_test_123"
 
 class GuardTests(unittest.TestCase):
     def setUp(self):
+        self.clock_patch = patch("Payment_guard.time.time", return_value=NOW)
+        self.clock_patch.start()
+        self.addCleanup(self.clock_patch.stop)
         self.policy = Policy(frozenset({PAYEE}), Decimal("50"), max_daily_usd=Decimal("75"))
         self.store = ReplayStore()
 
@@ -20,14 +24,14 @@ class GuardTests(unittest.TestCase):
             token = sign_approval(payee, amount, request_id, nonce, expires_at, SECRET)
         return authorize(payee, amount, self.policy if policy is None else policy,
                          request_id=request_id, approval_token=token,
-                         approval_secret=SECRET, replay_store=self.store, now=NOW)
+                         approval_secret=SECRET, replay_store=self.store)
 
     def test_valid_approval(self):
         self.assertTrue(self.check().allowed)
 
     def test_approval_boolean_cannot_bypass(self):
         self.assertFalse(authorize(PAYEE, "10", self.policy, approved=True,
-                                   request_id="r", replay_store=self.store, now=NOW).allowed)
+                                   request_id="r", replay_store=self.store).allowed)
 
     def test_payee_not_allowlisted(self):
         self.assertFalse(self.check(payee="other").allowed)
@@ -39,11 +43,11 @@ class GuardTests(unittest.TestCase):
         for i, amount in enumerate(["-1", "0", "NaN", "Infinity", "0.001", "abc", "", "1e999999"]):
             with self.subTest(amount=amount):
                 self.assertFalse(authorize(PAYEE, amount, self.policy, request_id=str(i),
-                                           replay_store=self.store, now=NOW).allowed)
+                                           replay_store=self.store).allowed)
 
     def test_floats_fail_closed(self):
         self.assertFalse(authorize(PAYEE, 10.0, self.policy, request_id="r",
-                                   replay_store=self.store, now=NOW).allowed)
+                                   replay_store=self.store).allowed)
 
     def test_trailing_zeros_are_valid(self):
         self.assertTrue(self.check(amount="50.000").allowed)
@@ -80,7 +84,7 @@ class GuardTests(unittest.TestCase):
         self.assertTrue(self.check(amount="25", request_id="req3", nonce="nonce3").allowed)
 
     def test_missing_store_denied(self):
-        self.assertFalse(authorize(PAYEE, "10", self.policy, request_id="x", now=NOW).allowed)
+        self.assertFalse(authorize(PAYEE, "10", self.policy, request_id="x").allowed)
 
     def test_concurrent_replay_denied(self):
         results = []
