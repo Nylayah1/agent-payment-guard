@@ -26,6 +26,16 @@ class GuardTests(unittest.TestCase):
                          request_id=request_id, approval_token=token,
                          approval_secret=SECRET, replay_store=self.store)
 
+    def test_approval_cannot_be_disabled_by_policy(self):
+        with self.assertRaises(ValueError):
+            Policy(frozenset({PAYEE}), Decimal("50"), require_approval=False,
+                   max_daily_usd=Decimal("75"))
+
+    def test_caller_cannot_override_trusted_clock(self):
+        with self.assertRaises(TypeError):
+            authorize(PAYEE, "10", self.policy, request_id="r",
+                      replay_store=self.store, now=NOW)
+
     def test_valid_approval(self):
         self.assertTrue(self.check().allowed)
 
