@@ -69,6 +69,9 @@ class ReplayStore:
         return True, "Policy reservation passed; backend must enforce payment outcome"
 
 
+_MAC_DOMAIN = b"agent-payment-guard/approval/v1\\x00"
+
+
 def _canonical(obj):
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
@@ -87,7 +90,7 @@ def sign_approval(payee_id, amount_usd, request_id, nonce, expires_at, secret):
                "currency": "USD", "request_id": request_id,
                "nonce": nonce, "expires_at": expires_at}
     data = _canonical(payload)
-    mac = hmac.new(secret, data, hashlib.sha256).digest()
+    mac = hmac.new(secret, _MAC_DOMAIN + data, hashlib.sha256).digest()
     return base64.urlsafe_b64encode(data + b"." + mac).decode("ascii")
 
 
