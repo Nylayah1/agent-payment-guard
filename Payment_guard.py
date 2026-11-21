@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from durable_store import SQLiteReplayStore
 
 
 def _usd(raw):
@@ -53,6 +54,19 @@ class ReplayStore:
     used_ids: set = field(default_factory=set)
     spent: dict = field(default_factory=dict)
     lock: object = field(default_factory=threading.Lock, repr=False)
+
+    def reserve(self, request_id, nonce, payee_id, utc_day, amount, daily_cap, now):
+        with self.lock:
+            if request_id in self.used_ids or (nonce is not None and ("nonce", nonce) in self.used_ids):
+                return False, "Replay or duplicate request"
+            spent = self.spent.get(utc_day, Decimal("0"))
+            if spent + amount > daily_cap:
+                return False, "Daily spending cap exceeded"
+            self.used_ids.add(request_id)
+            if nonce is not None:
+                self.used_ids.add(("nonce", nonce))
+            self.spent[utc_day] = spent + amount
+        return True, "Policy reservation passed; backend must enforce payment outcome"
 
 
 def _canonical(obj):
@@ -129,7 +143,7 @@ def authorize(payee_id: str, amount_usd: str, policy: Policy,
         return Decision(False, "Transaction exceeds limit")
     if not isinstance(request_id, str) or not request_id or len(request_id) > 256:
         return Decision(False, "Unique request ID required")
-    if not isinstance(replay_store, ReplayStore):
+    if not isinstance(replay_store, (ReplayStore, SQLiteReplayStore)):
         return Decision(False, "Replay store required")
     when = int(time.time()) if now is None else now
     if type(when) is not int or when < 0:
@@ -143,15 +157,7 @@ def authorize(payee_id: str, amount_usd: str, policy: Policy,
         day = datetime.fromtimestamp(when, tz=timezone.utc).date().isoformat()
     except (ValueError, OverflowError, OSError):
         return Decision(False, "Invalid timestamp")
-    with replay_store.lock:
-        if request_id in replay_store.used_ids or (
-                nonce is not None and ("nonce", nonce) in replay_store.used_ids):
-            return Decision(False, "Replay or duplicate request")
-        spent = replay_store.spent.get(day, Decimal("0"))
-        if spent + amount > policy.max_daily_usd:
-            return Decision(False, "Daily spending cap exceeded")
-        replay_store.used_ids.add(request_id)
-        if nonce is not None:
-            replay_store.used_ids.add(("nonce", nonce))
-        replay_store.spent[day] = spent + amount
-    return Decision(True, "Policy reservation passed; backend must enforce payment outcome")
+    allowed, reason = replay_store.reserve(
+        request_id, nonce, payee_id, day, amount, policy.max_daily_usd, when
+    )
+    return Decision(allowed, reason)
