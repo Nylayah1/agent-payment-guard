@@ -3,6 +3,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from decimal import Decimal
 from Payment_guard import Policy, authorize, sign_approval
 from durable_store import SQLiteReplayStore
@@ -14,6 +15,9 @@ NOW = 1795280000
 
 class DurableGuardTests(unittest.TestCase):
     def setUp(self):
+        self.clock_patch = patch("Payment_guard.time.time", return_value=NOW)
+        self.clock_patch.start()
+        self.addCleanup(self.clock_patch.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.path = os.path.join(self.tmp.name, "guard.db")
@@ -24,7 +28,7 @@ class DurableGuardTests(unittest.TestCase):
         token = sign_approval(payee, amount, request_id, nonce, NOW + 120, SECRET)
         return authorize(payee, amount, policy or self.policy, request_id=request_id,
                          approval_token=token, approval_secret=SECRET,
-                         replay_store=store or self.store, now=NOW)
+                         replay_store=store or self.store)
 
     def test_durable_replay_after_reopening(self):
         self.assertTrue(self.approve("r1", "n1").allowed)
@@ -77,7 +81,7 @@ class DurableGuardTests(unittest.TestCase):
 
     def test_no_approval_secret_fails_closed(self):
         result = authorize(PAYEE, "10", self.policy, approved=True, request_id="r1",
-                           replay_store=self.store, now=NOW)
+                           replay_store=self.store)
         self.assertFalse(result.allowed)
 
     def test_exact_payee_id_only(self):
