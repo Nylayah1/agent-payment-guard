@@ -40,8 +40,8 @@ class Policy:
                     or cap < 0 or cap > Decimal("90000000000000")
                     or cap != cap.quantize(Decimal("0.01"))):
                 raise ValueError("Invalid spending cap")
-        if type(self.require_approval) is not bool:
-            raise ValueError("Invalid approval requirement")
+        if self.require_approval is not True:
+            raise ValueError("Human approval cannot be disabled")
 
 
 @dataclass(frozen=True)
@@ -128,7 +128,7 @@ def _approved_nonce(token, secret, payee_id, amount, request_id, now):
 def authorize(payee_id: str, amount_usd: str, policy: Policy,
               approved: bool = False, *, request_id: str = None,
               approval_token: str = None, approval_secret: bytes = None,
-              replay_store: ReplayStore = None, now: int = None) -> Decision:
+              replay_store: ReplayStore = None) -> Decision:
     """Reserve a policy decision, NOT a payment. Backend must enforce decision.
 
     The legacy approved=True argument is deliberately ignored: it is not proof
@@ -150,7 +150,7 @@ def authorize(payee_id: str, amount_usd: str, policy: Policy,
         return Decision(False, "Unique request ID required")
     if not isinstance(replay_store, (ReplayStore, SQLiteReplayStore)):
         return Decision(False, "Replay store required")
-    when = int(time.time()) if now is None else now
+    when = int(time.time())
     if type(when) is not int or when < 0:
         return Decision(False, "Invalid timestamp")
     nonce = None
