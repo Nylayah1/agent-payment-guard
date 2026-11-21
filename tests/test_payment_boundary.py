@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 from decimal import Decimal
 from Payment_guard import Policy, ReplayStore, sign_approval
-from payment_boundary import guarded_dispatch
+from payment_boundary import guarded_dispatch, ProviderReceipt
 
 SECRET = b"development-test-key-32-bytes-0123456789"
 NOW = 1795280000
@@ -21,7 +21,7 @@ class BoundaryTests(unittest.TestCase):
 
     def provider(self, **kwargs):
         self.calls.append(kwargs)
-        return {"simulation": "accepted"}
+        return ProviderReceipt("accepted", "mock-reference")
 
     def dispatch(self, payee=PAYEE, amount="10", request_id="r1", provider=None, token=None):
         if token is None:
@@ -66,6 +66,24 @@ class BoundaryTests(unittest.TestCase):
         self.assertFalse(result.submitted)
         self.assertEqual(self.calls, [])
         self.assertFalse(self.dispatch().submitted)
+
+    def test_rejected_provider_response_is_never_success(self):
+        for idx, outcome in enumerate((
+            ProviderReceipt("rejected", "declined"),
+            ProviderReceipt("pending", "queued"),
+            {"status": "accepted"},
+            ProviderReceipt("accepted", ""),
+            None,
+            True,
+        )):
+            request_id = f"provider-failure-{idx}"
+            result = self.dispatch(
+                request_id=request_id,
+                provider=lambda **kwargs: outcome,
+            )
+            self.assertFalse(result.submitted)
+            self.assertFalse(self.dispatch(request_id=request_id).submitted)
+        self.assertEqual(self.calls, [])
 
     def test_spending_budget_blocks_second_provider_call(self):
         self.assertTrue(self.dispatch(amount="20").submitted)
