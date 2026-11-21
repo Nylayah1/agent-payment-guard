@@ -69,7 +69,7 @@ class ReplayStore:
         return True, "Policy reservation passed; backend must enforce payment outcome"
 
 
-_MAC_DOMAIN = b"agent-payment-guard/approval/v1\\x00"
+_MAC_DOMAIN = b"agent-payment-guard/approval/v1|"
 
 
 def _canonical(obj):
@@ -102,7 +102,7 @@ def _approved_nonce(token, secret, payee_id, amount, request_id, now):
         if len(raw) < 34 or raw[-33:-32] != b".":
             return None
         data, mac = raw[:-33], raw[-32:]
-        if not hmac.compare_digest(mac, hmac.new(secret, data, hashlib.sha256).digest()):
+        if not hmac.compare_digest(mac, hmac.new(secret, _MAC_DOMAIN + data, hashlib.sha256).digest()):
             return None
         payload = json.loads(data)
         if not isinstance(payload, dict) or data != _canonical(payload):
