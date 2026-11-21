@@ -46,6 +46,12 @@ class BoundaryTests(unittest.TestCase):
         self.assertFalse(self.dispatch().submitted)
         self.assertEqual(len(self.calls), 1)
 
+    def test_provider_receives_exact_canonical_amount(self):
+        for idx, input_amount in enumerate(("1e1", "+10.000", "10.0")):
+            result = self.dispatch(amount=input_amount, request_id=f"canonical-{idx}")
+            self.assertTrue(result.submitted)
+            self.assertEqual(self.calls[-1]["amount_usd"], "10.00")
+
     def test_provider_error_fails_closed_and_does_not_free_reservation(self):
         def failing_provider(**kwargs):
             raise ConnectionError("unknown provider outcome")
