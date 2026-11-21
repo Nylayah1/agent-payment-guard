@@ -8,12 +8,12 @@ import time
 from decimal import Decimal
 
 from Payment_guard import Policy, ReplayStore, sign_approval
-from payment_boundary import guarded_dispatch
+from payment_boundary import guarded_dispatch, ProviderReceipt
 
 
 def mock_provider(*, payee_id, amount_usd, idempotency_key):
     print(f"MOCK PROVIDER: {payee_id} USD {amount_usd}, key={idempotency_key}")
-    return {"status": "simulated", "idempotency_key": idempotency_key}
+    return ProviderReceipt("accepted", "mock-" + idempotency_key)
 
 
 def main():
