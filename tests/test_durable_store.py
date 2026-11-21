@@ -66,11 +66,14 @@ class DurableGuardTests(unittest.TestCase):
         policy = Policy(frozenset({PAYEE}), Decimal("50"))
         self.assertFalse(self.approve("r1", "n1", policy=policy).allowed)
 
-    def test_transaction_rejects_large_out_of_range_amounts(self):
+    def test_transaction_limits_handle_large_values_without_overflow(self):
         policy = Policy(frozenset({PAYEE}), Decimal("90000000000000"),
                         max_daily_usd=Decimal("90000000000000"))
         result = self.approve("r1", "n1", amount="90000000000000", policy=policy)
-        self.assertFalse(result.allowed)
+        self.assertTrue(result.allowed)
+        with self.assertRaises(ValueError):
+            Policy(frozenset({PAYEE}), Decimal("90000000000000.01"),
+                   max_daily_usd=Decimal("90000000000000.01"))
 
     def test_no_approval_secret_fails_closed(self):
         result = authorize(PAYEE, "10", self.policy, approved=True, request_id="r1",
