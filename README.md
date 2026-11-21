@@ -9,7 +9,7 @@ Python policy checker for AI-agent payment requests. **Does not intercept, execu
 - Exact provider **payee/account ID** allowlist (not a merchant display name)
 - Per-transaction USD maximum and a required daily spending cap, defaulting to zero (deny)
 - HMAC-SHA256 human-approval token bound to payee ID, precise USD amount, currency, unique request ID, nonce, and short expiry (up to 5 minutes remaining)
-- Duplicate request ID and nonce blocking through a locked, in-memory development ledger
+- Duplicate request ID and nonce blocking, with a **durable atomic SQLite option** for single-host integrations
 - Fail closed for invalid amounts, floats, NaN, infinity, fractional cents, missing replay store, missing approval token; redundant trailing zeros are accepted
 - Legacy caller-supplied `approved=True` **has no effect**: an AI agent cannot attest to human consent by setting a boolean
 
@@ -36,7 +36,7 @@ policy = Policy(
     max_transaction_usd=Decimal("50.00"),
     max_daily_usd=Decimal("100.00"),
 )
-ledger = ReplayStore()  # Demo only. Not durable across processes/restarts.
+ledger = ReplayStore()  # Simplest demo only. Not durable across processes/restarts.
 secret = secrets.token_bytes(32)  # Backend-only secret; never give to an agent.
 
 # Simulate an already authenticated and independently approved human request.
@@ -50,14 +50,31 @@ decision = authorize("acct_fake_store_1", "19.99", policy,
 print(decision)
 ```
 
+## Optional durable store (single local host only)
+
+```python
+from durable_store import SQLiteReplayStore
+
+# One local, access-restricted database file per payment account.
+# Only the trusted payment backend should be able to read/write it.
+ledger = SQLiteReplayStore("/private/path/agent-payment-ledger.sqlite3")
+```
+
+A successful decision permanently reserves its amount against that UTC day's
+budget in the prototype. It cannot be reversed by an untrusted caller.
+The backend must separately manage payment-provider idempotency, settlement,
+refunds, expired authorizations, and immutable audit logs.
+
 ## Critical security limitations
 
 1. **This library cannot prove someone actually approved a payment.** The backend must authenticate the human and keep its approval/signing workflow, signing secret, policy, and ledger completely outside the AI agent's control. Anyone who controls the secret can generate valid approvals.
-2. **The replay ledger is for one-process demos only.** Production requires durable, atomic, multi-worker request/nonce uniqueness, spending reservations, and audit trails, ideally database transactions.
+2. **Choose the ledger carefully.** `ReplayStore` is memory-only and loses all history on restart. `SQLiteReplayStore` provides atomic durable reservations across local worker processes sharing one single-host SQLite database file. It is NOT a distributed service, not suitable for shared network storage or ephemeral volumes. Protect and back up the database; partition ledgers by payment account/tenant. Production needs reconciliation, audit trails, and stronger operational controls.
 3. **The daily cap reserves budget; it does not settle payments.** Real systems must reconcile provider authorizations, captures, retries, failures, refunds, and expiration, and use payment-provider idempotency controls.
 4. **The guard does not enforce its own decision.** It must be integrated directly at the payment boundary, where payment credentials cannot bypass policy checks.
 5. **Use genuine provider payee IDs.** An agent-controlled display name is not a reliable payment destination.
 6. **Breaking change:** Old calls to `authorize(..., approved=True)` now deny, unless the caller also supplies trusted request ID, valid approval token, secret, ledger, and daily cap. `approved` remains in the signature solely for backward compatibility and is ignored.
+
+See [SECURITY.md](SECURITY.md) for the threat model, deployment gates, and remaining bypass risks. GitHub Actions runs the regression suite across Python 3.10–3.13.
 
 ## Request for developer review
 
