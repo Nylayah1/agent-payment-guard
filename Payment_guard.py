@@ -1,21 +1,44 @@
-"""Experimental fail-closed policy check for proposed AI-agent payments.
-
-Does NOT intercept or execute payments. The payment-controlling backend must
-enforce the decision before calling its payment provider.
-"""
-from dataclasses import dataclass
+"""Experimental policy-only AI agent payment guard. Does not move or block funds."""
+import base64
+import hashlib
+import hmac
+import json
+import threading
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+
+
+def _usd(raw):
+    if not isinstance(raw, str) or not raw or len(raw) > 64:
+        return None
+    try:
+        amount = Decimal(raw)
+        if not amount.is_finite() or amount <= 0 or amount != amount.quantize(Decimal("0.01")):
+            return None
+        return amount
+    except (InvalidOperation, ValueError):
+        return None
 
 
 @dataclass(frozen=True)
 class Policy:
+    # Use stable provider payee/account IDs, not merchant display names.
     allowed_merchants: frozenset[str]
     max_transaction_usd: Decimal
     require_approval: bool = True
+    max_daily_usd: Decimal = Decimal("0")  # Deny by default until configured.
 
     def __post_init__(self):
-        if not self.max_transaction_usd.is_finite() or self.max_transaction_usd < 0:
-            raise ValueError("Invalid transaction limit")
+        if not isinstance(self.allowed_merchants, frozenset) or not all(
+                isinstance(v, str) and bool(v.strip()) for v in self.allowed_merchants):
+            raise ValueError("Invalid payee allowlist")
+        for cap in (self.max_transaction_usd, self.max_daily_usd):
+            if not isinstance(cap, Decimal) or not cap.is_finite() or cap < 0:
+                raise ValueError("Invalid spending cap")
+        if type(self.require_approval) is not bool:
+            raise ValueError("Invalid approval requirement")
 
 
 @dataclass(frozen=True)
@@ -24,27 +47,111 @@ class Decision:
     reason: str
 
 
-def authorize(merchant: str, amount_usd: str, policy: Policy,
-              approved: bool = False) -> Decision:
-    """Return a policy decision; never move money.
+@dataclass
+class ReplayStore:
+    """In-memory demo only. Production needs a shared durable atomic store."""
+    used_ids: set = field(default_factory=set)
+    spent: dict = field(default_factory=dict)
+    lock: object = field(default_factory=threading.Lock, repr=False)
 
-    Only a trusted backend may set approved=True after verifying actual human
-    authorization. Never trust an AI agent's claim that approval happened.
-    """
-    if not isinstance(merchant, str) or not merchant.strip():
-        return Decision(False, "Missing merchant")
-    if merchant.strip().casefold() not in {m.casefold() for m in policy.allowed_merchants}:
-        return Decision(False, "Merchant not allowlisted")
-    if not isinstance(amount_usd, str):
-        return Decision(False, "Amount must be a decimal string")
+
+def _canonical(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+
+
+def sign_approval(payee_id, amount_usd, request_id, nonce, expires_at, secret):
+    """Backend ONLY, after authenticated human consent; never expose to an AI agent."""
+    if not isinstance(secret, bytes) or len(secret) < 32:
+        raise ValueError("Signing secret must be at least 32 bytes")
+    amount = _usd(amount_usd)
+    if amount is None or not all(isinstance(v, str) and bool(v) and len(v) <= 256
+                                 for v in (payee_id, request_id, nonce)):
+        raise ValueError("Invalid approval fields")
+    if type(expires_at) is not int or expires_at <= 0:
+        raise ValueError("Invalid expiration")
+    payload = {"payee_id": payee_id, "amount_usd": format(amount, ".2f"),
+               "currency": "USD", "request_id": request_id,
+               "nonce": nonce, "expires_at": expires_at}
+    data = _canonical(payload)
+    mac = hmac.new(secret, data, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(data + b"." + mac).decode("ascii")
+
+
+def _approved_nonce(token, secret, payee_id, amount, request_id, now):
+    if not isinstance(secret, bytes) or len(secret) < 32 or not isinstance(token, str) or len(token) > 4096:
+        return None
     try:
-        amount = Decimal(amount_usd)
-    except InvalidOperation:
-        return Decision(False, "Invalid amount")
-    if not amount.is_finite() or amount <= 0 or amount.as_tuple().exponent < -2:
+        raw = base64.b64decode(token, altchars=b"-_", validate=True)
+        if len(raw) < 34 or raw[-33:-32] != b".":
+            return None
+        data, mac = raw[:-33], raw[-32:]
+        if not hmac.compare_digest(mac, hmac.new(secret, data, hashlib.sha256).digest()):
+            return None
+        payload = json.loads(data)
+        if not isinstance(payload, dict) or data != _canonical(payload):
+            return None
+        if set(payload) != {"payee_id", "amount_usd", "currency", "request_id", "nonce", "expires_at"}:
+            return None
+        expiry = payload["expires_at"]
+        if (type(expiry) is not int or not now < expiry <= now + 300
+                or payload["payee_id"] != payee_id
+                or payload["amount_usd"] != format(amount, ".2f")
+                or payload["currency"] != "USD"
+                or payload["request_id"] != request_id
+                or not isinstance(payload["nonce"], str)
+                or not payload["nonce"]):
+            return None
+        return payload["nonce"]
+    except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
+        return None
+
+
+def authorize(payee_id: str, amount_usd: str, policy: Policy,
+              approved: bool = False, *, request_id: str = None,
+              approval_token: str = None, approval_secret: bytes = None,
+              replay_store: ReplayStore = None, now: int = None) -> Decision:
+    """Reserve a policy decision, NOT a payment. Backend must enforce decision.
+
+    The legacy approved=True argument is deliberately ignored: it is not proof
+    of independent human authorization. Keep policy, signing secret and ledger
+    exclusively on the trusted payment backend.
+    """
+    if not isinstance(policy, Policy):
+        return Decision(False, "Invalid policy")
+    if not isinstance(payee_id, str) or not payee_id.strip():
+        return Decision(False, "Missing payee ID")
+    if payee_id not in policy.allowed_merchants:
+        return Decision(False, "Payee ID not allowlisted")
+    amount = _usd(amount_usd)
+    if amount is None:
         return Decision(False, "Invalid USD amount")
     if amount > policy.max_transaction_usd:
         return Decision(False, "Transaction exceeds limit")
-    if policy.require_approval and approved is not True:
-        return Decision(False, "Independent human approval required")
-    return Decision(True, "Policy checks passed")
+    if not isinstance(request_id, str) or not request_id or len(request_id) > 256:
+        return Decision(False, "Unique request ID required")
+    if not isinstance(replay_store, ReplayStore):
+        return Decision(False, "Replay store required")
+    when = int(time.time()) if now is None else now
+    if type(when) is not int or when < 0:
+        return Decision(False, "Invalid timestamp")
+    nonce = None
+    if policy.require_approval:
+        nonce = _approved_nonce(approval_token, approval_secret, payee_id, amount, request_id, when)
+        if nonce is None:
+            return Decision(False, "Valid independent human approval required")
+    try:
+        day = datetime.fromtimestamp(when, tz=timezone.utc).date().isoformat()
+    except (ValueError, OverflowError, OSError):
+        return Decision(False, "Invalid timestamp")
+    with replay_store.lock:
+        if request_id in replay_store.used_ids or (
+                nonce is not None and ("nonce", nonce) in replay_store.used_ids):
+            return Decision(False, "Replay or duplicate request")
+        spent = replay_store.spent.get(day, Decimal("0"))
+        if spent + amount > policy.max_daily_usd:
+            return Decision(False, "Daily spending cap exceeded")
+        replay_store.used_ids.add(request_id)
+        if nonce is not None:
+            replay_store.used_ids.add(("nonce", nonce))
+        replay_store.spent[day] = spent + amount
+    return Decision(True, "Policy reservation passed; backend must enforce payment outcome")
