@@ -6,6 +6,27 @@ unless a separate, trusted payment backend enforces the decision. There is
 no deployed backend, authenticated human approval UI, payment gateway adapter,
 or independent external penetration test.
 
+## November 21 hardening: direct dual-guard testing and provider receipts
+
+- The offline combined test now requires separately signed, request-bound
+  **synthetic customer consent on every simulated payment**, even if the
+  legacy checker would otherwise allow a below-threshold payment.
+  Approval generation remains a **test fixture**: there is still no live
+  identity service, verified user session, or trustworthy approval UI.
+- The combined tests use a shared durable SQLite payment ledger, including
+  reopening after a checker reset, concurrent budget requests, and simulated
+  provider rejections/unknown outcomes. This is NOT a distributed deployment.
+- The reference boundary only counts a typed `ProviderReceipt(status="accepted",
+  reference="...")` as *acknowledged submission*; it does NOT imply settlement.
+  Malformed, rejected, pending, exception, and unverified results are not success.
+  All reservations remain retained until a future trusted reconciliation system.
+- An externally provided callback is **not authenticated** by this Python code.
+  A real adapter must verify provider identity, response integrity and provider
+  transaction identifiers before creating a `ProviderReceipt`.
+- The actual provider adapter, human approval service, authorization/capture,
+  refunds, reconciliation, chargebacks and cross-service audit remain unbuilt.
+  Do not deploy this for real payments.
+
 ## Protected assets
 - Actual payment-provider credentials and ability to initiate transfers
 - Human authorization identity and exact amount/payee/currency
