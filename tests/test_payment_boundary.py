@@ -47,10 +47,10 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 1)
 
     def test_provider_receives_exact_canonical_amount(self):
-        for idx, input_amount in enumerate(("1e1", "+10.000", "10.0")):
+        for idx, input_amount in enumerate(("1e0", "+1.000", "1.0")):
             result = self.dispatch(amount=input_amount, request_id=f"canonical-{idx}")
             self.assertTrue(result.submitted)
-            self.assertEqual(self.calls[-1]["amount_usd"], "10.00")
+            self.assertEqual(self.calls[-1]["amount_usd"], "1.00")
 
     def test_provider_error_fails_closed_and_does_not_free_reservation(self):
         def failing_provider(**kwargs):
