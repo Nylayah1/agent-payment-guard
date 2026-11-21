@@ -1,4 +1,17 @@
-# Agent Payment Guard — experimental developer preview
+# Agent Payment Guard — security-focused developer prototype
+
+**An offline-testable, fail-closed payment policy boundary for AI-initiated requests.**
+
+Designed to demonstrate explicit human consent verification, exact payee/amount binding,
+atomic replay prevention and budget reservations **before** a trusted payment backend
+contacts its provider. This is intentionally narrow, with documented limitations.
+
+**Start here:** `python demo.py` to see a simulated first request succeed,
+a duplicate request fail, and a payee substitution get blocked.
+Then run `python -m unittest discover -s tests -v` to inspect the security tests.
+
+For the design and attack cases, read **[ARCHITECTURE.md](ARCHITECTURE.md)**.
+For security boundaries and unfinished release gates, read **[SECURITY.md](SECURITY.md)**.
 
 Python policy checker for AI-agent payment requests. **Does not intercept, execute, or block real payments.** A trusted payment-controlling backend must enforce the result before sending any request to a payment provider.
 
@@ -14,13 +27,17 @@ Python policy checker for AI-agent payment requests. **Does not intercept, execu
 - Human approval **cannot be turned off** in policy; caller-supplied `approved=True` has no effect
 - Authorization uses the backend process clock, not a caller-supplied timestamp
 
-## Run tests
+## Quick start
 
-Python 3.10+; standard library only.
+Python 3.10+; standard library only. No bank credentials or internet needed.
 
 ```sh
+python demo.py
 python -m unittest discover -s tests -v
 ```
+
+GitHub Actions also runs the demo and regression suite on Python 3.10,
+3.11, 3.12 and 3.13. Both the demo and tests use **fake payees only**.
 
 ## Trusted-backend demonstration (fake data)
 
@@ -86,6 +103,16 @@ transaction, prove settlement, or prevent bypass from other code paths.**
 6. **Breaking change:** Old calls to `authorize(..., approved=True)` now deny, unless the caller also supplies trusted request ID, valid approval token, secret, ledger, and daily cap. `approved` remains in the signature solely for backward compatibility and is ignored.
 
 See [SECURITY.md](SECURITY.md) for the threat model, deployment gates, and remaining bypass risks. GitHub Actions runs the regression suite across Python 3.10–3.13.
+
+## For security reviewers
+
+We welcome a **specific, reproducible attack case** with fake inputs.
+Suggested areas: signing authority isolation, duplicate request IDs across process
+restarts, SQLite file replacement, daily cap races, provider idempotency,
+and bypassing the mandatory backend enforcement point.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the review guide and [SECURITY.md](SECURITY.md)
+for remaining deployment blockers. No independent audit has been completed.
 
 ## Request for developer review
 
