@@ -6,7 +6,7 @@ This adapter cannot protect a separate, unguarded provider integration.
 """
 from dataclasses import dataclass
 from typing import Any, Callable
-from Payment_guard import Decision, Policy, authorize
+from Payment_guard import Decision, Policy, authorize, _usd
 
 
 @dataclass(frozen=True)
@@ -33,8 +33,11 @@ def guarded_dispatch(payee_id: str, amount_usd: str, policy: Policy, *,
         return DispatchResult(False, decision.reason)
     if not callable(provider_submit):
         return DispatchResult(False, "Provider unavailable; reservation retained")
+    # Pass the same canonical cents amount that policy and token verification used.
+    # An external provider must never reinterpret exponent/trailing-zero notation.
+    canonical_amount = format(_usd(amount_usd), ".2f")
     try:
-        response = provider_submit(payee_id=payee_id, amount_usd=amount_usd,
+        response = provider_submit(payee_id=payee_id, amount_usd=canonical_amount,
                                    idempotency_key=request_id)
     except Exception:
         # Never release a reservation merely because a network call failed:
