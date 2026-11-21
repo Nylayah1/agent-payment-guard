@@ -36,7 +36,9 @@ class Policy:
                 isinstance(v, str) and bool(v.strip()) for v in self.allowed_merchants):
             raise ValueError("Invalid payee allowlist")
         for cap in (self.max_transaction_usd, self.max_daily_usd):
-            if not isinstance(cap, Decimal) or not cap.is_finite() or cap < 0:
+            if (not isinstance(cap, Decimal) or not cap.is_finite()
+                    or cap < 0 or cap > Decimal("90000000000000")
+                    or cap != cap.quantize(Decimal("0.01"))):
                 raise ValueError("Invalid spending cap")
         if type(self.require_approval) is not bool:
             raise ValueError("Invalid approval requirement")
