@@ -8,7 +8,8 @@ contacts its provider. This is intentionally narrow, with documented limitations
 
 **Start here:** `python demo.py` to see a simulated first request succeed,
 a duplicate request fail, and a payee substitution get blocked.
-Then run `python -m unittest discover -s tests -v` to inspect the security tests.
+Then run `python -m pip install 'cryptography>=42,<47'
+python -m unittest discover -s tests -v` to inspect the security tests.
 
 For the design and attack cases, read **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 For security boundaries and unfinished release gates, read **[SECURITY.md](SECURITY.md)**.
@@ -29,7 +30,7 @@ Python policy checker for AI-agent payment requests. **Does not intercept, execu
 
 ## Quick start
 
-Python 3.10+; standard library only. No bank credentials or internet needed.
+Python 3.10+; the core guard and demo use the standard library only. The full dual-checker test suite also requires `cryptography` (the CI workflow installs it). No bank credentials are needed.
 
 ```sh
 python demo.py
@@ -92,6 +93,29 @@ call errors, the reservation remains consumed because the provider may have
 already processed the request. The callback receives the request ID as its
 idempotency key. **This does not implement a payment provider, perform a
 transaction, prove settlement, or prevent bypass from other code paths.**
+
+## Hardened integration and outcomes (offline, simulated only)
+
+- The direct **two-checker test fixture** now requires a valid, separately
+  signed, request-bound customer proof for *every* test payment. Below-threshold
+  payments are held without proof. This is still synthetic consent, not a real
+  human authentication and approval service.
+- The dual-checker suite uses the durable SQLite payment reservation ledger,
+  and exercises replay after process/checker resets, concurrent spending,
+  forged signatures, missing consent, provider rejection and uncertainty.
+- `payment_boundary.ProviderReceipt` is a typed outcome contract for a
+  trusted adapter: only an **accepted** submission with a nonblank reference
+  is acknowledged. This is **not** proof of capture or settlement.
+- `reconciliation.ProviderOutcomeJournal` persists simulated, ordered
+  provider outcome events: pending, accepted, settled, rejected, refunded and
+  disputed. It never automatically refunds the guard's daily budget or
+  reopens replayed requests. It does **not** fetch, verify or act on provider
+  events; an external trusted gateway and verified event processing are still
+  missing.
+- A real payment provider adapter, verified human approval service, secure
+  token issuance, multi-host storage and production reconciliation remain
+  separate unbuilt release requirements. **Do not use this prototype with
+  actual money.**
 
 ## Critical security limitations
 
