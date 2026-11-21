@@ -4,7 +4,7 @@ This is an integration building block, NOT a payment processor. The caller
 must retain sole custody of this database, serialize payment-provider actions
 with its own idempotency key, and reconcile settlement independently.
 """
-import os
+from contextlib import closing
 import sqlite3
 from decimal import Decimal
 
@@ -21,7 +21,7 @@ class SQLiteReplayStore:
         if not isinstance(path, str) or not path.strip() or path == ":memory:":
             raise ValueError("A durable SQLite file path is required")
         self.path = path
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             conn.execute("""CREATE TABLE IF NOT EXISTS reservations (
                 request_id TEXT PRIMARY KEY,
                 nonce TEXT UNIQUE,
@@ -56,7 +56,7 @@ class SQLiteReplayStore:
         try:
             cents = self._cents(amount)
             cap_cents = self._cents(daily_cap)
-            with self._connect() as conn:
+            with closing(self._connect()) as conn:
                 conn.execute("BEGIN IMMEDIATE")
                 duplicate = conn.execute(
                     "SELECT 1 FROM reservations WHERE request_id = ? OR (nonce IS NOT NULL AND nonce = ?) LIMIT 1",
