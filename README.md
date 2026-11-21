@@ -8,8 +8,7 @@ contacts its provider. This is intentionally narrow, with documented limitations
 
 **Start here:** `python demo.py` to see a simulated first request succeed,
 a duplicate request fail, and a payee substitution get blocked.
-Then run `python -m pip install 'cryptography>=42,<47'
-python -m unittest discover -s tests -v` to inspect the security tests.
+Then install the checker test dependency and run the security suite as shown in Quick start.
 
 For the design and attack cases, read **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 For security boundaries and unfinished release gates, read **[SECURITY.md](SECURITY.md)**.
@@ -34,6 +33,7 @@ Python 3.10+; the core guard and demo use the standard library only. The full du
 
 ```sh
 python demo.py
+python -m pip install 'cryptography>=42,<47'
 python -m unittest discover -s tests -v
 ```
 
