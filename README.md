@@ -11,7 +11,8 @@ Python policy checker for AI-agent payment requests. **Does not intercept, execu
 - HMAC-SHA256 human-approval token bound to payee ID, precise USD amount, currency, unique request ID, nonce, and short expiry (up to 5 minutes remaining)
 - Duplicate request ID and nonce blocking, with a **durable atomic SQLite option** for single-host integrations
 - Fail closed for invalid amounts, floats, NaN, infinity, fractional cents, missing replay store, missing approval token; redundant trailing zeros are accepted
-- Legacy caller-supplied `approved=True` **has no effect**: an AI agent cannot attest to human consent by setting a boolean
+- Human approval **cannot be turned off** in policy; caller-supplied `approved=True` has no effect
+- Authorization uses the backend process clock, not a caller-supplied timestamp
 
 ## Run tests
 
@@ -64,6 +65,16 @@ A successful decision permanently reserves its amount against that UTC day's
 budget in the prototype. It cannot be reversed by an untrusted caller.
 The backend must separately manage payment-provider idempotency, settlement,
 refunds, expired authorizations, and immutable audit logs.
+
+## Reference provider boundary (simulation only)
+
+`payment_boundary.guarded_dispatch(...)` demonstrates how the trusted backend
+must check the guard immediately before forwarding a payment request. If
+authorization fails, **the provider callback is never invoked**. If a provider
+call errors, the reservation remains consumed because the provider may have
+already processed the request. The callback receives the request ID as its
+idempotency key. **This does not implement a payment provider, perform a
+transaction, prove settlement, or prevent bypass from other code paths.**
 
 ## Critical security limitations
 
